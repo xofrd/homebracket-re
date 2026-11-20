@@ -29,8 +29,11 @@ def develop(path: Path, scale: float = 1.0) -> np.ndarray:
 def fuse(images: list[np.ndarray]) -> np.ndarray:
     """Mertens exposure fusion. Input/output float32 RGB in [0, 1]."""
     # OpenCV 5.x expects float32 inputs scaled to 0..255 (0..1 inputs give an almost black result).
+    # The inputs are scaled in place to save memory (the caller does not reuse them).
+    for i in images:
+        i *= np.float32(255.0)
     merge = cv2.createMergeMertens()
-    out = merge.process([np.ascontiguousarray(i * 255.0, dtype=np.float32) for i in images])
+    out = merge.process(images)
     return np.clip(out, 0.0, 1.0).astype(np.float32)
 
 

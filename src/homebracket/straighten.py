@@ -24,6 +24,11 @@ class Result:
     n_lines: int = 0
     n_inliers: int = 0
     crop_scale: float = 1.0
+    yaw_deg: float = 0.0              # lateral turn corrected using the horizontal lines
+    n_h_lines: int = 0                # horizontal lines supporting the yaw estimate
+    dev_h_before: float | None = None  # median |angle from horizontal| of those lines, degrees
+    dev_h_after: float | None = None
+    yaw_note: str = ""
     homography: np.ndarray | None = None
     crop: tuple[int, int, int, int] | None = None   # x0, y0, w, h in the full-res warped canvas
 
@@ -149,15 +154,67 @@ def inscribed_rect(quad: np.ndarray, aspect: float, w0: int, h0: int):
     return s, (int(round(px - rw / 2)), int(round(py - rh / 2)), rw, rh)
 
 
+def _hist_mode(angles: np.ndarray, weights: np.ndarray, lo: float, hi: float,
+               bw: float = 0.4, step: float = 0.05):
+    """Weighted kernel-density mode of angles (degrees) inside [lo, hi]."""
+    grid = np.arange(lo, hi + step, step)
+    dens = np.zeros_like(grid)
+    for a, w in zip(angles, weights):
+        dens += w * np.exp(-0.5 * ((grid - a) / bw) ** 2)
+    k = int(np.argmax(dens))
+    return float(grid[k]), float(dens[k])
+
+
+def estimate_yaw(segs: np.ndarray, K: np.ndarray, R_v: np.ndarray, min_len: float,
+                 max_yaw: float):
+    """After the verticals are fixed, find the dominant front-facing horizontal direction.
+
+    In the vertically-corrected frame a horizontal 3D direction is (cos a, 0, sin a) and every
+    line with plane normal n satisfies n . d = 0, so each line votes for one angle
+    a = atan2(-n_x, n_z). The most voted angle near 0 is the front wall's horizontal family.
+    Returns (a_deg or None, supporting-line mask, note).
+    """
+    length = np.hypot(segs[:, 2] - segs[:, 0], segs[:, 3] - segs[:, 1])
+    dev = np.abs(_wrap(_vertical_dev(segs)))          # 90 = horizontal in the image
+    cand = segs[(length >= min_len) & (dev >= 55)]
+    if len(cand) < 6:
+        return None, np.zeros(len(cand), bool), cand, "too few horizontal lines"
+    n, w = _normals(cand, K)
+    n2 = n @ R_v.T
+    a = np.degrees(np.arctan2(-n2[:, 0], n2[:, 2]))
+    a = (a + 90.0) % 180.0 - 90.0
+    peak, _ = _hist_mode(a, w, -90.0, 90.0)
+    # the front family is the best peak within +-max_yaw; receding lines vote far from 0
+    near = np.abs(a) <= max_yaw + 3.0
+    if near.sum() < 6:
+        return None, near, cand, "no frontal horizontal family (angled view?)"
+    peak, _ = _hist_mode(a[near], w[near], -max_yaw - 3.0, max_yaw + 3.0)
+    sup = np.abs(a - peak) <= 0.6
+    if sup.sum() < 6:
+        return None, sup, cand, "horizontal family too weak"
+    peak = float(np.average(a[sup], weights=w[sup]))
+    if abs(peak) > max_yaw:
+        return None, sup, cand, f"yaw {peak:.1f} deg exceeds limit {max_yaw:.0f} (angled view): not corrected"
+    return peak, sup, cand, ""
+
+
+def _h_dev(segs: np.ndarray) -> float:
+    """Median |angle from horizontal| in the image, degrees."""
+    d = segs[:, 2:] - segs[:, :2]
+    ang = np.degrees(np.arctan2(d[:, 1], d[:, 0]))
+    return float(np.median(np.abs((ang + 90.0) % 180.0 - 90.0)))
+
+
 def estimate(gray_small: np.ndarray, full_size: tuple[int, int], focal_mm: float,
-             max_pitch: float = 12.0, max_roll: float = 6.0,
-             sensor_w_mm: float = 36.0) -> Result:
+             max_pitch: float = 12.0, max_roll: float = 6.0, max_yaw: float = 6.0,
+             use_horizontals: bool = True, sensor_w_mm: float = 36.0) -> Result:
     """Estimate the correction on a small grayscale copy; return a homography for full size."""
     hs, ws = gray_small.shape[:2]
     wf, hf = full_size
     K_small = camera_matrix(ws, hs, focal_mm, sensor_w_mm)
     segs = detect_segments(gray_small)
-    vert = select_vertical(segs, min_len=0.03 * max(hs, ws)) if len(segs) else np.zeros((0, 4))
+    min_len = 0.03 * max(hs, ws)
+    vert = select_vertical(segs, min_len=min_len) if len(segs) else np.zeros((0, 4))
     if len(vert) < 8:
         return Result("skipped_no_lines", n_lines=len(vert))
     dev_before = float(np.median(np.abs(_wrap(_vertical_dev(vert)))))
@@ -165,13 +222,24 @@ def estimate(gray_small: np.ndarray, full_size: tuple[int, int], focal_mm: float
     if d is None or inl.sum() < 6:
         return Result("skipped_no_lines", n_lines=len(vert), n_inliers=int(inl.sum()),
                       dev_before=dev_before)
-    R = rotation_to_vertical(d)
-    rvec = cv2.Rodrigues(R)[0].ravel()
+    R_v = rotation_to_vertical(d)
+    rvec = cv2.Rodrigues(R_v)[0].ravel()
     pitch, roll = float(np.degrees(rvec[0])), float(np.degrees(rvec[2]))
+    R = R_v
+    yaw, n_h, dh_b, dh_a, note, sup_segs = 0.0, 0, None, None, "", None
+    if use_horizontals and len(segs):
+        a, sup, cand, note = estimate_yaw(segs, K_small, R_v, min_len, max_yaw)
+        if a is not None:
+            yaw, n_h, sup_segs = a, int(sup.sum()), cand[sup]
+            R = cv2.Rodrigues(np.array([0.0, np.radians(a), 0.0]))[0] @ R_v
     Hs = K_small @ R @ np.linalg.inv(K_small)
     p1 = _apply(Hs, vert[:, :2]); p2 = _apply(Hs, vert[:, 2:])
     dev_after = float(np.median(np.abs(_wrap(_vertical_dev(np.c_[p1, p2])))))
-    base = Result("ok", pitch, roll, dev_before, dev_after, len(vert), int(inl.sum()))
+    if sup_segs is not None:
+        q1 = _apply(Hs, sup_segs[:, :2]); q2 = _apply(Hs, sup_segs[:, 2:])
+        dh_b, dh_a = _h_dev(sup_segs), _h_dev(np.c_[q1, q2])
+    base = Result("ok", pitch, roll, dev_before, dev_after, len(vert), int(inl.sum()),
+                  yaw_deg=yaw, n_h_lines=n_h, dev_h_before=dh_b, dev_h_after=dh_a, yaw_note=note)
     if abs(pitch) > max_pitch or abs(roll) > max_roll:
         base.status = "skipped_too_tilted"
         return base
@@ -189,5 +257,7 @@ def warp(img: np.ndarray, res: Result) -> np.ndarray:
         return img
     x0, y0, rw, rh = res.crop
     T = np.array([[1, 0, -x0], [0, 1, -y0], [0, 0, 1.0]])
-    return cv2.warpPerspective(img, T @ res.homography, (rw, rh), flags=cv2.INTER_CUBIC,
-                               borderMode=cv2.BORDER_REPLICATE)
+    out = cv2.warpPerspective(img, T @ res.homography, (rw, rh), flags=cv2.INTER_CUBIC,
+                              borderMode=cv2.BORDER_REPLICATE)
+    np.clip(out, 0.0, 1.0, out=out)  # cubic interpolation can overshoot slightly below 0 / above 1
+    return out

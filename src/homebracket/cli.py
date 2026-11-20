@@ -3,12 +3,54 @@ from __future__ import annotations
 
 import argparse
 import sys
-from concurrent.futures import ProcessPoolExecutor
+import subprocess
+import time
 from dataclasses import asdict
 from multiprocessing import get_context
 from pathlib import Path
 
 from . import exif, grouping, pipeline, report
+
+
+def _child_rss_mb(pid: int) -> float:
+    try:
+        out = subprocess.run(["ps", "-o", "rss=", "-p", str(pid)], capture_output=True, text=True,
+                             stdin=subprocess.DEVNULL).stdout.strip()
+        return int(out) / 1024 if out else 0.0
+    except Exception:
+        return 0.0
+
+
+def _worker(q, *a):
+    try:
+        q.put(pipeline.process_group(*a))
+    except Exception as e:  # report instead of crashing silently
+        q.put({"status": f"error: {e}"})
+
+
+def run_isolated(args_tuple, max_mem_mb: float):
+    """Run one group in a fresh process; kill it if it exceeds the memory limit."""
+    ctx = get_context("spawn")
+    q = ctx.Queue()
+    p = ctx.Process(target=_worker, args=(q, *args_tuple))
+    p.start()
+    peak = 0.0
+    while p.is_alive():
+        peak = max(peak, _child_rss_mb(p.pid))
+        if max_mem_mb and peak > max_mem_mb:
+            p.kill()
+            p.join()
+            return {"status": f"stopped: memory limit {max_mem_mb:.0f} MB exceeded (seen {peak:.0f} MB)",
+                    "peak_mb": round(peak)}
+        time.sleep(0.25)
+        if not q.empty():
+            break
+    try:
+        r = q.get(timeout=30)
+    except Exception:
+        r = {"status": "error: no result from worker"}
+    p.join(timeout=10)
+    return r
 
 
 def _groups(args):
@@ -41,25 +83,20 @@ def cmd_run(args):
     out = Path(args.output).expanduser() if args.output else Path(args.folder).expanduser() / "Out"
     out.mkdir(parents=True, exist_ok=True)
     opts = pipeline.Options(scale=args.scale, do_align=args.align, do_straighten=not args.no_straighten,
-                            focal_mm=args.focal_mm, max_pitch=args.max_pitch, max_roll=args.max_roll,
+                            focal_mm=args.focal_mm, max_pitch=args.max_pitch, max_roll=args.max_roll, max_yaw=args.max_yaw,
+                            use_horizontals=not args.no_horizontals, balance=args.balance,
                             quality=args.quality, tiff=args.tiff, tolerance_deg=args.tolerance)
     todo = [g for g in groups if not g.skipped]
     if args.only:
         todo = todo[: args.only]
     rows = []
-    ctx = get_context("spawn")
     for n, g in enumerate(todo, 1):
         ordered = g.by_brightness()
         focal = args.focal_mm or ordered[0].focal_mm
         paths = [str(s.path) for s in ordered]
         print(f"({n}/{len(todo)}) processing {g.name} ...", flush=True)
         # one fresh process per group: memory is returned to the OS after each one
-        with ProcessPoolExecutor(1, mp_context=ctx) as ex:
-            try:
-                r = ex.submit(pipeline.process_group, paths, len(paths) // 2, focal,
-                              str(out), asdict(opts)).result()
-            except Exception as e:  # keep going with the other groups
-                r = {"status": f"error: {e}"}
+        r = run_isolated((paths, len(paths) // 2, focal, str(out), asdict(opts)), args.max_mem_mb)
         r.update(name=g.name, warnings=g.warnings)
         rows.append(r)
         print(f"    -> {r.get('status')}  {r.get('seconds', '-')} s  peak {r.get('peak_mb', '-')} MB", flush=True)
@@ -85,6 +122,10 @@ def main(argv=None):
             s.add_argument("--focal-mm", type=float, help="override focal length from EXIF")
             s.add_argument("--max-pitch", type=float, default=12.0)
             s.add_argument("--max-roll", type=float, default=6.0)
+            s.add_argument("--max-yaw", type=float, default=6.0, help="largest lateral turn to correct, degrees")
+            s.add_argument("--no-horizontals", action="store_true", help="correct verticals only")
+            s.add_argument("--balance", type=float, default=0.5, help="light balance strength 0..1 (0 = off)")
+            s.add_argument("--max-mem-mb", type=float, default=5500, help="stop a group above this memory (0 = no limit)")
             s.add_argument("--tolerance", type=float, default=0.3, help="vertical tolerance in degrees")
             s.add_argument("--quality", type=int, default=95)
             s.add_argument("--tiff", action="store_true", help="also write a 16-bit TIFF (~200 MB each)")

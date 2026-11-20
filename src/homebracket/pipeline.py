@@ -10,7 +10,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from . import export, fuse, straighten
+from . import balance, export, fuse, straighten
 
 
 @dataclass
@@ -21,6 +21,9 @@ class Options:
     focal_mm: float | None = None
     max_pitch: float = 12.0
     max_roll: float = 6.0
+    max_yaw: float = 6.0
+    use_horizontals: bool = True
+    balance: float = 0.5
     quality: int = 95
     tiff: bool = False
     tolerance_deg: float = 0.3
@@ -63,11 +66,16 @@ def process_group(shots_paths: list[str], ref_index: int, focal_mm: float | None
                             cv2.COLOR_RGB2GRAY)
         gray = np.clip(gray * 255, 0, 255).astype(np.uint8)
         res = straighten.estimate(gray, (w, h), focal_mm or 10.0,
-                                  opts.max_pitch, opts.max_roll)
+                                  opts.max_pitch, opts.max_roll, opts.max_yaw, opts.use_horizontals)
         fused = straighten.warp(fused, res)
         info = {k: v for k, v in asdict(res).items() if k not in ("homography",)}
         if res.status == "ok" and res.dev_after is not None and res.dev_after > opts.tolerance_deg:
             info["status"] = "review_tolerance"
+
+    if opts.balance > 0:
+        fused, bsum = balance.apply(fused, opts.balance)
+        info["balance_min_stops"] = round(bsum.get("min_stops", 0.0), 2)
+        info["balance_max_stops"] = round(bsum.get("max_stops", 0.0), 2)
 
     jpg = out / f"{stem}_hb.jpg"
     export.write_jpeg(fused, jpg, opts.quality)
