@@ -72,6 +72,7 @@ def test_mertens_fuses_three_exposures():
     out = fuse.fuse(ims)
     assert out.shape == base.shape and out.dtype == np.float32
     assert 0.0 <= out.min() and out.max() <= 1.0
+    assert 0.3 < out.mean() < 0.7  # regression: result must not be nearly black
 
 
 def test_align_undoes_a_shift():
