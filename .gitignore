@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+# photos and outputs never go in the repo
+*.ARW
+*.arw
+*.CR2
+*.CR3
+*.NEF
+*.DNG
+*.dng
+*.tif
+*.tiff
+*.jpg
+*.jpeg
+out/
+samples-private/
