@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "homebracket"
+version = "0.1.0"
+description = "Open-source automation for bracketed real estate and architectural photos"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = ["numpy", "opencv-python-headless", "rawpy", "pillow", "tifffile"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+homebracket = "homebracket.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

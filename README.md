@@ -32,6 +32,20 @@ Each step is a swappable module so different approaches can be compared on the s
 
 A test bench that renders the same scenes through different variants side by side is part of the plan, so contributors can compare results objectively.
 
+## Prototype v0.1 (what exists today)
+
+Implemented: bracket grouping and sanity checks (by file order or capture time), RAW development with `rawpy`, Mertens exposure fusion (OpenCV), optional alignment, automatic vertical correction (pitch and roll from vertical-line vanishing direction, with a tilt limit so angled shots are flagged instead of forced), JPEG export with copied EXIF, and an HTML before/after report. Each bracket runs in its own process to keep memory use low. Unit tests use synthetic images only; **it has not been validated on real photos yet**.
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"        # needs exiftool installed (macOS: brew install exiftool)
+homebracket check /path/to/raws                 # show how files are grouped, with warnings
+homebracket run /path/to/raws -o out --scale 0.5 --only 1   # quick half-size test of one bracket
+homebracket run /path/to/raws -o out            # full resolution
+```
+
+Output is JPEG by default (about 10 to 20 MB at 33 MP). A 16-bit TIFF (`--tiff`) is about 200 MB per image at 33 MP, so it is opt-in.
+
 ## Working together with darktable (goal)
 
 HomeBracket should work **alongside [darktable](https://www.darktable.org/)**, not instead of it. The idea is to automate the repetitive steps and hand the photographer a result that is already open and adjustable in darktable. Possible integration paths, to be researched and compared:
