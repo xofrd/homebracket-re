@@ -32,6 +32,21 @@ Each step is a swappable module so different approaches can be compared on the s
 
 A test bench that renders the same scenes through different variants side by side is part of the plan, so contributors can compare results objectively.
 
+## Working together with darktable (goal)
+
+HomeBracket should work **alongside [darktable](https://www.darktable.org/)**, not instead of it. The idea is to automate the repetitive steps and hand the photographer a result that is already open and adjustable in darktable. Possible integration paths, to be researched and compared:
+
+1. **darktable as a backend:** HomeBracket calls `darktable-cli` to apply a saved style / XMP sidecar and export (darktable's CLI applies stored parameters; it does not appear to run the automatic perspective fit by itself).
+2. **XMP sidecars as the bridge:** HomeBracket computes values (for example the vertical correction) and writes them into an XMP history stack so the image opens in darktable already corrected. This needs reverse-engineering of darktable's module parameter format.
+3. **A Lua script / plugin inside darktable:** darktable has a [Lua API](https://docs.darktable.org/usermanual/development/en/lua/api/) and a community [lua-scripts](https://github.com/darktable-org/lua-scripts) collection (for example `enfuseAdvanced` and bracket-grouping scripts), which could call HomeBracket from the darktable interface.
+4. **Plain files:** HomeBracket outputs 16-bit TIFF or DNG that darktable imports as usual.
+
+We do not know yet whether a ready-made connection exists. If you work on darktable (Lua, CLI, or modules such as perspective correction) and have ideas or prior art, **please open an issue**: help from the darktable community is explicitly wanted.
+
+## Optional later: color grading in DaVinci Resolve (idea)
+
+As a possible final, optional step, finished photos could be passed through **DaVinci Resolve** for color grading. Newer Resolve versions are reported to include a Photo page for still images; which edition includes it, and whether it can be scripted for batch work, has **not been verified** yet. This is an idea for later, not a commitment, and it would stay optional so the core pipeline remains free and open source.
+
 ## Known limitations (please read)
 
 - **Angled or corner shots do not work well.** If the camera is not square to the subject (for example a corner, diagonal, or strongly tilted perspective), vertical correction and alignment can stretch and distort the image heavily, and the result is likely to look bad. HomeBracket assumes verticals should end up vertical and the view is roughly perpendicular to the main wall.
