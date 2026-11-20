@@ -73,6 +73,15 @@ def _show(groups):
             print(f"    ! {w}")
 
 
+def _parse_roi(text):
+    if not text:
+        return None
+    v = [float(x) for x in text.split(",")]
+    if len(v) != 4 or not (0 <= v[0] < v[2] <= 1 and 0 <= v[1] < v[3] <= 1):
+        sys.exit("--roi must be x0,y0,x1,y1 as fractions of the image, e.g. 0.3,0.2,0.75,0.7")
+    return tuple(v)
+
+
 def cmd_check(args):
     _show(_groups(args))
 
@@ -85,6 +94,7 @@ def cmd_run(args):
     opts = pipeline.Options(scale=args.scale, do_align=args.align, do_straighten=not args.no_straighten,
                             focal_mm=args.focal_mm, max_pitch=args.max_pitch, max_roll=args.max_roll, max_yaw=args.max_yaw,
                             use_horizontals=not args.no_horizontals, balance=args.balance,
+                            roi=_parse_roi(args.roi),
                             quality=args.quality, tiff=args.tiff, tolerance_deg=args.tolerance)
     todo = [g for g in groups if not g.skipped]
     if args.only:
@@ -123,6 +133,7 @@ def main(argv=None):
             s.add_argument("--max-pitch", type=float, default=12.0)
             s.add_argument("--max-roll", type=float, default=6.0)
             s.add_argument("--max-yaw", type=float, default=6.0, help="largest lateral turn to correct, degrees")
+            s.add_argument("--roi", help="x0,y0,x1,y1 (fractions): only use lines inside this box, e.g. the house on a facade")
             s.add_argument("--no-horizontals", action="store_true", help="correct verticals only")
             s.add_argument("--balance", type=float, default=0.5, help="light balance strength 0..1 (0 = off)")
             s.add_argument("--max-mem-mb", type=float, default=5500, help="stop a group above this memory (0 = no limit)")

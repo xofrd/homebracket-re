@@ -36,6 +36,7 @@ def write_report(out_dir: Path, rows: list[dict]) -> Path:
                          f"<tr><th>pitch / roll</th><td>{_fmt(r.get('pitch_deg'),1)}° / {_fmt(r.get('roll_deg'),1)}°</td><th>crop kept</th><td>{_fmt(r.get('crop_scale'))}</td></tr>"
                          f"<tr><th>yaw corrected</th><td>{_fmt(r.get('yaw_deg'),1)}° ({_fmt(r.get('n_h_lines'))} lines)</td><th>horizontal dev. before / after</th><td>{_fmt(r.get('dev_h_before'))}° / {_fmt(r.get('dev_h_after'))}°</td></tr>"
                          f"<tr><th>light balance (stops)</th><td>{_fmt(r.get('balance_min_stops'))} to +{_fmt(r.get('balance_max_stops'))}</td><th>note</th><td>{html.escape(str(r.get('yaw_note') or ''))}</td></tr>"
+                         f"<tr><th>residual: left / right (verticals)</th><td>{_fmt(r.get('dev_v_left'))}° / {_fmt(r.get('dev_v_right'))}°</td><th>top / bottom (horizontals)</th><td>{_fmt(r.get('dev_h_top'))}° / {_fmt(r.get('dev_h_bottom'))}°</td></tr>"
                          f"<tr><th>lines / inliers</th><td>{_fmt(r.get('n_lines'))} / {_fmt(r.get('n_inliers'))}</td><th>output</th><td>{html.escape(Path(r['output']).name)}</td></tr></table>")
         for w in r.get("warnings", []):
             parts.append(f"<p class=warn>⚠ {html.escape(w)}</p>")

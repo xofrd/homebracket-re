@@ -24,6 +24,7 @@ class Options:
     max_yaw: float = 6.0
     use_horizontals: bool = True
     balance: float = 0.5
+    roi: tuple | None = None
     quality: int = 95
     tiff: bool = False
     tolerance_deg: float = 0.3
@@ -66,10 +67,13 @@ def process_group(shots_paths: list[str], ref_index: int, focal_mm: float | None
                             cv2.COLOR_RGB2GRAY)
         gray = np.clip(gray * 255, 0, 255).astype(np.uint8)
         res = straighten.estimate(gray, (w, h), focal_mm or 10.0,
-                                  opts.max_pitch, opts.max_roll, opts.max_yaw, opts.use_horizontals)
+                                  opts.max_pitch, opts.max_roll, opts.max_yaw, opts.use_horizontals,
+                                  roi=opts.roi)
         fused = straighten.warp(fused, res)
         info = {k: v for k, v in asdict(res).items() if k not in ("homography",)}
-        if res.status == "ok" and res.dev_after is not None and res.dev_after > opts.tolerance_deg:
+        worst = res.worst_deg if res.worst_deg is not None else res.dev_after
+        info["worst_deg"] = None if worst is None else round(worst, 3)
+        if res.status == "ok" and worst is not None and worst > opts.tolerance_deg:
             info["status"] = "review_tolerance"
 
     if opts.balance > 0:

@@ -163,3 +163,66 @@ def test_warp_output_stays_in_range():
     res = straighten.estimate(gray, (1600, 1066), 10.0)
     out = straighten.warp(img.astype(np.float32) / 255, res)
     assert np.isfinite(out).all() and out.min() >= 0.0 and out.max() <= 1.0
+
+
+def test_region_weights_gives_the_sparse_side_a_voice():
+    segs_len = np.r_[np.full(30, 100.0), np.full(5, 100.0)]
+    region = np.r_[np.zeros(30, int), np.ones(5, int)]
+    w = straighten.region_weights(segs_len, region)
+    assert w[region == 1].sum() / w.sum() >= 0.4
+    assert straighten.region_weights(segs_len[:31], np.r_[np.zeros(30, int), [1]]).sum() > 0  # too few: untouched
+
+
+def _vertical_segments(n, x0, x1, tilt_deg, h=1000):
+    xs = np.linspace(x0, x1, n)
+    dx = np.tan(np.radians(tilt_deg)) * h
+    return np.array([[x, 0, x + dx, h] for x in xs], float)
+
+
+def test_crowded_left_does_not_overrule_right_side():
+    K = straighten.camera_matrix(1600, 1066, 10.0)
+    left = _vertical_segments(30, 100, 700, 0.0)       # many lines, perfectly vertical
+    right = _vertical_segments(6, 900, 1500, 1.0)      # few lines, 1 degree tilted
+    segs = np.vstack([left, right])
+    region = (((segs[:, 0] + segs[:, 2]) / 2) >= 800).astype(int)
+    plain = straighten.estimate_vertical_direction(segs, K)[0]
+    bal = straighten.estimate_vertical_direction(segs, K, weights=straighten.region_weights(straighten._lengths(segs), region))[0]
+    ang = lambda d: abs(np.degrees(np.arctan2(d[0], d[1])))
+    assert ang(bal) > ang(plain)  # the sparse side pulls the balanced estimate toward itself
+
+
+def test_roi_keeps_only_lines_inside():
+    segs = np.array([[100, 100, 100, 300], [800, 100, 800, 300]], float)
+    out = straighten.in_roi(segs, (1000, 1000), (0.5, 0.0, 1.0, 1.0))
+    assert len(out) == 1 and out[0][0] == 800
+
+
+def test_roll_is_leveled_from_horizontals_when_no_verticals():
+    img = np.full((1066, 1600, 3), 200, np.uint8)
+    for y in range(80, 1066, 90):
+        cv2.line(img, (0, y), (1600, y), (30, 30, 30), 4)
+    tilt = tilted(img, 0.0, 2.0)
+    gray = cv2.cvtColor(tilt, cv2.COLOR_BGR2GRAY)
+    res = straighten.estimate(gray, (1600, 1066), 10.0)
+    assert res.status == "ok_horizontals_only", res
+    assert res.dev_h_after < 0.3 < res.dev_h_before
+
+
+def test_quadrant_residuals_are_reported():
+    img = tilted(synthetic_wall(), 3.0, 1.0)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    res = straighten.estimate(gray, (1600, 1066), 10.0)
+    assert res.dev_v_left is not None and res.dev_v_right is not None
+    assert res.worst_deg is not None and res.worst_deg < 0.5
+
+
+def test_random_clutter_is_not_treated_as_verticals():
+    rng = np.random.default_rng(5)
+    img = np.full((1066, 1600, 3), 200, np.uint8)
+    for _ in range(60):  # short random strokes, like foliage
+        x, y = int(rng.integers(100, 1500)), int(rng.integers(100, 900))
+        a = np.radians(90 + rng.uniform(-15, 15))
+        cv2.line(img, (x, y), (int(x + 70 * np.cos(a)), int(y + 70 * np.sin(a))), (30, 30, 30), 3)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    res = straighten.estimate(gray, (1600, 1066), 10.0)
+    assert res.status in ("skipped_no_lines", "ok_horizontals_only")
