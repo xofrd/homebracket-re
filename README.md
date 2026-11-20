@@ -40,11 +40,11 @@ Implemented: bracket grouping and sanity checks (by file order or capture time),
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"        # needs exiftool installed (macOS: brew install exiftool)
 homebracket check /path/to/raws                 # show how files are grouped, with warnings
-homebracket run /path/to/raws -o out --scale 0.5 --only 1   # quick half-size test of one bracket
-homebracket run /path/to/raws -o out            # full resolution
+homebracket run /path/to/raws --scale 0.5 --only 1   # quick half-size test of one bracket
+homebracket run /path/to/raws                        # full resolution
 ```
 
-Output is JPEG by default (about 10 to 20 MB at 33 MP). A 16-bit TIFF (`--tiff`) is about 200 MB per image at 33 MP, so it is opt-in.
+Results are written to an `Out` subfolder inside the folder with the original RAW files (override with `-o`); the originals are never modified. Output is JPEG by default (about 10 to 20 MB at 33 MP). A 16-bit TIFF (`--tiff`) is about 200 MB per image at 33 MP, so it is opt-in.
 
 ## Working together with darktable (goal)
 

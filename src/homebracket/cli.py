@@ -38,7 +38,7 @@ def cmd_check(args):
 def cmd_run(args):
     groups = _groups(args)
     _show(groups)
-    out = Path(args.output).expanduser()
+    out = Path(args.output).expanduser() if args.output else Path(args.folder).expanduser() / "Out"
     out.mkdir(parents=True, exist_ok=True)
     opts = pipeline.Options(scale=args.scale, do_align=args.align, do_straighten=not args.no_straighten,
                             focal_mm=args.focal_mm, max_pitch=args.max_pitch, max_roll=args.max_roll,
@@ -78,7 +78,7 @@ def main(argv=None):
         s.add_argument("--time-gap", type=float, default=4.0, help="seconds between brackets (group-by time)")
         s.set_defaults(fn=fn)
         if name == "run":
-            s.add_argument("-o", "--output", default="out")
+            s.add_argument("-o", "--output", default=None, help="output folder (default: an \"Out\" subfolder inside the input folder)")
             s.add_argument("--scale", type=float, default=1.0, help="0.5 = half size (fast tests)")
             s.add_argument("--align", action="store_true", help="align frames (hand-held brackets)")
             s.add_argument("--no-straighten", action="store_true")
